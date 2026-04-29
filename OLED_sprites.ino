@@ -4,38 +4,12 @@
 #include <ssd1306xled.h>
 #include "Sprites.h"
 
-// // default I2C address used is 0X3C, change as per your need
-// #ifdef SSD1306_SA
-//   #undef SSD1306_SA
-//   #define SSD1306_SA 0X3C
-// #else
-//   #define SSD1306_SA 0X3C
-// #endif
-
-// // default PIN configuration is as below
-// // VCC ---- vcc
-// // GND ---- gnd
-// // SCL ---- pb2
-// // SDA ---- pb0
-
-// // change them if you need
-// #ifdef SSD1306_SCL
-//   #undef SSD1306_SCL
-//   #define SSD1306_SCL PB2
-// #else
-//   #define SSD1306_SCL PB2
-// #endif
-
-// #ifdef SSD1306_SDA
-//   #undef SSD1306_SDA
-//   #define SSD1306_SDA PB0
-// #else
-//   #define SSD1306_SDA PB2
-// #endif
-
 #define _ENABLE_MASK_
 
 #define _USE_FAST_SPRITES_
+
+constexpr uint8_t SPRITE_DELETE   = 0x01;
+constexpr uint8_t SPRITE_FINISHED = 0x80;
 
 bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite = 255, 
                               const uint8_t *background = nullptr, 
@@ -47,21 +21,16 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
 
 unsigned char str[10];
 
-constexpr uint8_t SPRITE_DELETE   = 0x01;
-constexpr uint8_t SPRITE_FINISHED = 0x80;
-
 SSD1306_SPRITE _spriteList[] = { 
 #ifdef _ENABLE_MASK_
-  #if 0
-  {  60, 32, 0, meteor_w_mask_16x16 },
   { 104, 10, 0, meteor_w_mask_16x16 },
   {  54, 43, 0, meteor_w_mask_16x16 },
   {  84, 27, 0, moon_w_mask_30x32 },
   {  94, 58, 0, moon_w_mask_30x32 },
   { 127, 28, 0, meteor_w_mask_16x16 },
   { 118, 52, 0, meteor_w_mask_16x16 },
-  #endif
-  { 55,  1, 0, ship_w_mask_18x16 },
+  {  60, 32, 0, meteor_w_mask_16x16 },
+  {  10,  0, 0, ship_w_mask_18x16 },
 #else
   {  60, 32, 0, meteor_16x16 },
   { 104, 10, 0, meteor_16x16 },
@@ -72,7 +41,6 @@ SSD1306_SPRITE _spriteList[] = {
   { 118, 52, 0, meteor_16x16 },
   {  20,  1, 0, ship_16x16 },
 #endif
-  #if 0
   {},
   {},
   {},
@@ -80,7 +48,6 @@ SSD1306_SPRITE _spriteList[] = {
   {},
   {},
   {},
-  #endif
   {},
 };
 
@@ -142,12 +109,18 @@ void loop() {
     #else
       ssd1306_draw_sprites_px( _spriteList, spriteCount << 1, spriteCount - 1, background, 0, 128, 0, 7 );
     #endif
-        SSD1306.ssd1306_setpos( 96, 7 );
-        itoa( millis() - startTime, str, 10 );
-        SSD1306.ssd1306_string_font6x8( str );
-        SSD1306.ssd1306_string_font6x8( " " );
+      SSD1306.ssd1306_setpos( 110, 7 );
+      int frameTime = millis() - startTime;
+      itoa( frameTime, str, 10 );
+      SSD1306.ssd1306_string_font6x8( str );
+      
+      SSD1306.ssd1306_string_font6x8( " " );
 
-      _delay_ms( 50 );
+      while ( frameTime < 50 )
+      {
+        _delay_ms( 1 );
+        frameTime++;
+      }
     }
   }
 
@@ -404,7 +377,7 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
     for ( int16_t x_chunk = screenStartX; x_chunk < screenEndPosX; x_chunk += bufferSize )
     {
       // initialize all buffers with background or empty
-      if ( background ) { memcpy( buffer, background + x_chunk - screenStartX, bufferSize ); }
+      if ( background ) { memcpy_P( buffer, background + x_chunk - screenStartX, bufferSize ); }
       else { memset( buffer, 0, bufferSize ); }
       // no data written yet
       memset( dirtyFlags, 0, dirtyFlagsSize );
@@ -444,11 +417,17 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
           #endif
 
             uint8_t bitmapOffset = 0;
+            // clip left
             if ( spriteStartX < x_chunk )
             {
               bitmapOffset = x_chunk - spriteStartX;
               spriteWidth -= bitmapOffset;
-              // TODO: handle sprites that are wider than <bufferSize>
+              spriteStartX = x_chunk;
+            }
+            // clip right
+            if ( spriteStartX + spriteWidth >= x_chunk_end )
+            {
+              spriteWidth = x_chunk_end - spriteStartX;
             }
 
             // normalize sprite x position
@@ -523,13 +502,10 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
               }
             }
 
-            // just mark the sprite position as "dirty", so the background will be sent to the display
-            else
+            // mark the sprite position as "dirty", so the background will be sent to the display
+            for ( int8_t x = spriteStartX; x < spriteEndX; x++ )
             {
-              for ( int8_t x = spriteStartX; x < spriteEndX; x++ )
-              {
-                dirtyFlags[x] = true;
-              }
+              dirtyFlags[x] = true;
             }
 
           } // sprite is on page
