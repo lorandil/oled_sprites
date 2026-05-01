@@ -70,6 +70,8 @@ void loop() {
 
     const uint8_t *background = !run ? nullptr : moon128x128;
 
+    uint16_t maxFrameTime = 0;
+
     if ( background ) { SSD1306.ssd1306_draw_bmp( 0, 0, 128, 8, background ); }
 
     uint8_t spriteCount = sizeof( _spriteList ) / sizeof( _spriteList[0] ) / 2;
@@ -109,12 +111,15 @@ void loop() {
     #else
       ssd1306_draw_sprites_px( _spriteList, spriteCount << 1, spriteCount - 1, background, 0, 128, 0, 7 );
     #endif
-      SSD1306.ssd1306_setpos( 110, 7 );
       int frameTime = millis() - startTime;
+      if ( frameTime > maxFrameTime ) { maxFrameTime = frameTime; }
+
+      SSD1306.ssd1306_setpos( 110, 6 );
       itoa( frameTime, str, 10 );
-      SSD1306.ssd1306_string_font6x8( str );
-      
-      SSD1306.ssd1306_string_font6x8( " " );
+      SSD1306.ssd1306_string_font6x8( str ); SSD1306.ssd1306_string_font6x8( " " );
+      SSD1306.ssd1306_setpos( 110, 7 );
+      itoa( maxFrameTime, str, 10 );
+      SSD1306.ssd1306_string_font6x8( str ); SSD1306.ssd1306_string_font6x8( " " );
 
       while ( frameTime < 50 )
       {
@@ -353,7 +358,7 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
 // !For simplicity's sake it's assumed that the screen size is a multiple of the buffer size!
 
 // for testing the RAM buffer size is 64 bytes * 2 + 64 *1/8th bytes for the dirty flags
-constexpr uint8_t bufferSize = 64;
+constexpr uint8_t bufferSize = 13;
 constexpr uint8_t dirtyFlagsSize = bufferSize;
 uint8_t buffer[bufferSize];
 uint8_t mask[bufferSize];
