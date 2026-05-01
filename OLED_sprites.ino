@@ -6,6 +6,12 @@
 
 #define _ENABLE_MASK_
 
+// enabling bitfield saves 7/8th of the buffer size, but costs 42 bytes
+// of flash and decreases the performance significantly. Most of the time it is more
+// efficient to reduce the buffer size by half and use bytes for the dirty flags
+// which saves even more RAM ;)
+//#define _USE_DIRTY_BITFIELD_
+
 #define _USE_FAST_SPRITES_
 
 constexpr uint8_t SPRITE_DELETE   = 0x01;
@@ -358,11 +364,15 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
 // !For simplicity's sake it's assumed that the screen size is a multiple of the buffer size!
 
 // for testing the RAM buffer size is 64 bytes * 2 + 64 *1/8th bytes for the dirty flags
-constexpr uint8_t bufferSize = 13;
-constexpr uint8_t dirtyFlagsSize = bufferSize;
+constexpr uint8_t bufferSize = 64;
+#ifdef _USE_DIRTY_BITFIELD_
+  constexpr uint8_t dirtyFlagsSize = ( bufferSize + 7 ) / 8;
+#else
+  constexpr uint8_t dirtyFlagsSize = bufferSize;
+#endif
 uint8_t buffer[bufferSize];
 uint8_t mask[bufferSize];
-uint8_t dirtyFlags[bufferSize]; // TODO: use bitfield!
+uint8_t dirtyFlags[dirtyFlagsSize];
 
 bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite, 
                               const uint8_t *background /*= nullptr*/,
@@ -510,7 +520,11 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
             // mark the sprite position as "dirty", so the background will be sent to the display
             for ( int8_t x = spriteStartX; x < spriteEndX; x++ )
             {
+            #ifdef _USE_DIRTY_BITFIELD_
+              dirtyFlags[(x >> 3)] |= ( 1 << ( x & 0x07 ) );
+            #else
               dirtyFlags[x] = true;
+            #endif
             }
 
           } // sprite is on page
@@ -525,7 +539,11 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
       for ( uint8_t x = 0; x < bufferSize; x++ )
       {
         // is this byte dirty?
+      #ifdef _USE_DIRTY_BITFIELD_
+        if ( dirtyFlags[(x >> 3)] & ( 1 << ( x & 0x07 ) ) )
+      #else
         if ( dirtyFlags[x] )
+      #endif
         {
           // transfer already active?
           if ( !transferActive )
