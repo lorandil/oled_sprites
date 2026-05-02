@@ -6,18 +6,18 @@
 
 #define _ENABLE_MASK_
 
-// enabling bitfield saves 7/8th of the buffer size, but costs 42 bytes
-// of flash and decreases the performance significantly. Most of the time it is more
-// efficient to reduce the buffer size by half and use bytes for the dirty flags
-// which saves even more RAM ;)
-//#define _USE_DIRTY_BITFIELD_
-
 #define _USE_FAST_SPRITES_
+
+#define _USE_FULL_SCREEN_
 
 constexpr uint8_t SPRITE_DELETE   = 0x01;
 constexpr uint8_t SPRITE_FINISHED = 0x80;
 
-bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite = 255, 
+constexpr uint8_t _workBufferSize = 192;
+uint8_t _workBuffer[_workBufferSize];
+
+bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
+                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite = 255, 
                               const uint8_t *background = nullptr, 
                             #ifdef _ENABLE_MASK_
                               const bool useMask = false,
@@ -29,10 +29,10 @@ unsigned char str[10];
 
 SSD1306_SPRITE _spriteList[] = { 
 #ifdef _ENABLE_MASK_
-  { 104, 10, 0, meteor_w_mask_16x16 },
+  { 100, 10, 0, meteor_w_mask_16x16 },
   {  54, 43, 0, meteor_w_mask_16x16 },
-  {  84, 27, 0, moon_w_mask_30x32 },
-  {  94, 58, 0, moon_w_mask_30x32 },
+  {  84, 19, 0, moon_w_mask_30x32 },
+  { 114, 38, 0, moon_w_mask_30x32 },
   { 127, 28, 0, meteor_w_mask_16x16 },
   { 118, 52, 0, meteor_w_mask_16x16 },
   {  60, 32, 0, meteor_w_mask_16x16 },
@@ -104,7 +104,7 @@ void loop() {
       uint16_t startTime = millis();
 
     #ifdef _ENABLE_MASK_
-      if ( ssd1306_draw_sprites_px( _spriteList, spriteCount << 1, spriteCount - 1, background, true, 0, 128, 0, 7 ) )
+      if ( ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, spriteCount - 1, background, true, 0, 128, 0, 7 ) )
       {
         SSD1306.ssd1306_setpos( 96, 0 );
         SSD1306.ssd1306_string_font6x8( "BOOM!" );
@@ -115,7 +115,7 @@ void loop() {
         SSD1306.ssd1306_string_font6x8( "ok   " );
       }
     #else
-      ssd1306_draw_sprites_px( _spriteList, spriteCount << 1, spriteCount - 1, background, 0, 128, 0, 7 );
+      ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, spriteCount - 1, background, 0, 128, 0, 7 );
     #endif
       int frameTime = millis() - startTime;
       if ( frameTime > maxFrameTime ) { maxFrameTime = frameTime; }
@@ -360,21 +360,9 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
 // Faster version using more RAM for buffering
 // The idea is to use three buffers (background, mask, dirty) of the same size and clip the sprites
 // to the appropriate regions. With a reasonable buffer size this version is much faster than the
-// no RAM version above.
-// !For simplicity's sake it's assumed that the screen size is a multiple of the buffer size!
-
-// for testing the RAM buffer size is 64 bytes * 2 + 64 *1/8th bytes for the dirty flags
-constexpr uint8_t bufferSize = 64;
-#ifdef _USE_DIRTY_BITFIELD_
-  constexpr uint8_t dirtyFlagsSize = ( bufferSize + 7 ) / 8;
-#else
-  constexpr uint8_t dirtyFlagsSize = bufferSize;
-#endif
-uint8_t buffer[bufferSize];
-uint8_t mask[bufferSize];
-uint8_t dirtyFlags[dirtyFlagsSize];
-
-bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite, 
+// RAMless version above.
+bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
+                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite, 
                               const uint8_t *background /*= nullptr*/,
                             #ifdef _ENABLE_MASK_  
                               const bool useMask /*= false*/,
@@ -382,20 +370,28 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
                               const uint8_t screenStartX /*= 0*/, const uint8_t screenWidth /*= 128*/,
                               const uint8_t screenStartPage /*= 0*/, const uint8_t screenEndPage /*= 7*/ )
 {
+  // assign buffers
+  const uint8_t bufferSize = workBufferSize / 3;
+  uint8_t *buffer = workBuffer;
+  uint8_t *mask = workBuffer + bufferSize;
+  uint8_t *dirtyFlags = mask + bufferSize;
+
+  // no collision yet
   bool collision = false;
 
-  uint8_t screenEndPosX = screenStartX + screenWidth - 1;
+  // calculate last valid column
+  const uint8_t screenEndPosX = screenStartX + screenWidth - 1;
 
   for ( int8_t page = screenStartPage; page <= screenEndPage; page++ )
   {
     // split the screen width in chunks of <bufferSize>
-    for ( int16_t x_chunk = screenStartX; x_chunk < screenEndPosX; x_chunk += bufferSize )
+    for ( int16_t x_chunk = screenStartX; x_chunk <= screenEndPosX; x_chunk += bufferSize )
     {
       // initialize all buffers with background or empty
       if ( background ) { memcpy_P( buffer, background + x_chunk - screenStartX, bufferSize ); }
       else { memset( buffer, 0, bufferSize ); }
       // no data written yet
-      memset( dirtyFlags, 0, dirtyFlagsSize );
+      memset( dirtyFlags, 0, bufferSize );
     #ifdef _ENABLE_MASK_
       // no mask here
       memset( mask, 0, bufferSize );
@@ -518,14 +514,7 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
             }
 
             // mark the sprite position as "dirty", so the background will be sent to the display
-            for ( int8_t x = spriteStartX; x < spriteEndX; x++ )
-            {
-            #ifdef _USE_DIRTY_BITFIELD_
-              dirtyFlags[(x >> 3)] |= ( 1 << ( x & 0x07 ) );
-            #else
-              dirtyFlags[x] = true;
-            #endif
-            }
+            for ( int8_t x = spriteStartX; x < spriteEndX; x++ ) { dirtyFlags[x] = true; }
 
           } // sprite is on page
 
@@ -539,11 +528,7 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
       for ( uint8_t x = 0; x < bufferSize; x++ )
       {
         // is this byte dirty?
-      #ifdef _USE_DIRTY_BITFIELD_
-        if ( dirtyFlags[(x >> 3)] & ( 1 << ( x & 0x07 ) ) )
-      #else
         if ( dirtyFlags[x] )
-      #endif
         {
           // transfer already active?
           if ( !transferActive )
@@ -578,9 +563,6 @@ bool ssd1306_draw_sprites_px( SSD1306_SPRITE *spriteList, const uint8_t maxSprit
       background += screenWidth;
     }
   } // for page
-
-  // clear finished flag on all sprites
-  for ( int n = 0; n < maxSprites; n++ ) { spriteList[n].flags &= ~SPRITE_FINISHED; }
 
   return( collision );
 }
