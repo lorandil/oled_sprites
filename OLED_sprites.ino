@@ -95,7 +95,7 @@ void loop() {
 
     SSD1306.ssd1306_fillscreen(0);
 
-    const uint8_t *background = !run ? nullptr : moon128x128;
+    const uint8_t *background = !run ? nullptr : Moon128x64;
 
   #ifdef _ENABLE_DIAGNOSTICS_
     int16_t maxFrameTime = 0;
@@ -335,7 +335,7 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 }
 
               #ifdef _ENABLE_MASK_  
-                // check for collision with player sprite
+                // check for collision with player sprite(s)
                 if ( n >= playerSprite )
                 {
                   if ( mask[spriteStartX + x] & maskValue ) { collision = true; }
