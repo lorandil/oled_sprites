@@ -9,6 +9,12 @@
 // The interleaved bitmap/mask format is compatible with Arduboy sprites
 #define _ENABLE_MASK_
 
+// enable collision checks for the player sprite
+// without collision checks we don't need a mask buffer
+#ifdef _ENABLE_MASK_
+  #define _ENABLE_COLLISION_CHECKS_
+#endif
+
 // calculate frame times and show max. frame time on the screen
 // checks and displays also collision of player sprite with other sprites
 #define _ENABLE_DIAGNOSTICS_
@@ -34,11 +40,18 @@ constexpr int8_t SPRITE_DELETE = -1;
 
 // global RAM buffer
 constexpr uint8_t _spriteBufferSize = 64;
-constexpr uint8_t _workBufferSize = 3 * _spriteBufferSize;
+#ifdef _ENABLE_COLLISION_CHECKS_
+  constexpr uint8_t _workBufferSize = 3 * _spriteBufferSize;
+#else
+  constexpr uint8_t _workBufferSize = 2 * _spriteBufferSize;
+#endif
 uint8_t _workBuffer[_workBufferSize];
 
 bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
-                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite = 255, 
+                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites,
+                            #ifdef _ENABLE_COLLISION_CHECKS_  
+                              const uint8_t playerSprite = 255, 
+                            #endif
                               const uint8_t *background = nullptr, 
                             #ifdef _ENABLE_MASK_
                               const bool useMask = false,
@@ -52,10 +65,10 @@ SSD1306_SPRITE _spriteList[] = {
 #ifdef _ENABLE_MASK_
   { 100, -4, 0, meteor_w_mask_16x16 },
   {  54, 43, 1, meteor_w_mask_16x16 },
-  {  84, 19, 0, moon_w_mask_30x32 },
-  { 114, 38, 0, moon_w_mask_30x32 },
+  {  74, 19, 0, moon_w_mask_30x32 },
   { 140, 28, 3, meteor_w_mask_16x16 },
-  { 90, 52, 0, meteor_w_mask_16x16 },
+  { 114, 38, 0, moon_w_mask_30x32 },
+  {  90, 52, 0, meteor_w_mask_16x16 },
   {  67, 32, 2, meteor_w_mask_16x16 },
   {  10,  0, 0, ship_w_mask_18x16 },
 #else
@@ -122,24 +135,24 @@ void loop() {
       {
         if ( !run )
         { 
-          _spriteList[n].x -= 1;
+          _spriteList[n].x -= ( n >> 2 ) + 1;
           if ( _spriteList[n].header == meteor_w_mask_16x16 )
           {
             if ( ( ( step + n ) & 0xf ) == 0 )
             {
-              _spriteList[n].frame++;
+              _spriteList[n].frame ++;
               _spriteList[n].frame &= 0x03;
             }
           }
         }
         else
         { 
-          _spriteList[n].x += 1;
+          _spriteList[n].x += ( n >> 2 ) + 1;
           if ( _spriteList[n].header == meteor_w_mask_16x16 )
           {
             if ( ( ( step + n ) & 0x0f ) == 0 )
             {
-              _spriteList[n].frame--;
+              _spriteList[n].frame --;
               _spriteList[n].frame &= 0x03;
             }
           }
@@ -151,7 +164,11 @@ void loop() {
     #endif
 
     #ifdef _ENABLE_MASK_
-      if ( ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, spriteCount - 1, background, true, 0, 128, 0, 7 ) )
+      if ( ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, 
+                                  #ifdef _ENABLE_COLLISION_CHECKS_
+                                    spriteCount - 1,
+                                  #endif
+                                    background, true, 0, 128, 0, 7 ) )
       {
     #ifdef _ENABLE_DIAGNOSTICS_
         SSD1306.ssd1306_setpos( 96, 0 );
@@ -164,7 +181,11 @@ void loop() {
     #endif
       }
     #else
-      ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, spriteCount - 1, background, 0, 128, 0, 7 );
+      ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1,
+                             #ifdef _ENABLE_COLLISION_CHECKS_
+                               spriteCount - 1,
+                             #endif
+                               background, 0, 128, 0, 7 );
     #endif
 
     #ifdef _ENABLE_DIAGNOSTICS_
@@ -191,14 +212,17 @@ void loop() {
 }
 
 /////////////////////////////////////////////////////////////////////////////
-// Faster sprites using a configurable RAM buffer
-// The idea is to use three buffers (background, mask, dirty) of the same size and clip the sprites
-// to the appropriate regions.
-// With a reasonable buffer size this version is quite fast.
+// Faster sprites routine using a configurable RAM buffer.
+// The idea is to use three buffers (background, collision, dirty) of the same size
+// and clip the sprites to the appropriate buffer regions.
 // A buffer size of 32 bytes per buffer is a good choice to start with,
 // below 8 bytes per buffer performance starts to degrade fast.
+// The work buffer size is required to be an integer divisor of the screen width!
 bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
-                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites, const uint8_t playerSprite, 
+                              SSD1306_SPRITE *spriteList, const uint8_t maxSprites,
+                            #ifdef _ENABLE_COLLISION_CHECKS_  
+                              const uint8_t playerSprite /*= 255*/,
+                            #endif
                               const uint8_t *background /*= nullptr*/,
                             #ifdef _ENABLE_MASK_  
                               const bool useMask /*= false*/,
@@ -207,10 +231,16 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                               const uint8_t screenStartPage /*= 0*/, const uint8_t screenEndPage /*= 7*/ )
 {
   // assign buffers
+#if defined( _ENABLE_COLLISION_CHECKS_ )
   const uint8_t bufferSize = workBufferSize / 3; // TODO: not happy with division here
+#else
+  const uint8_t bufferSize = workBufferSize / 2;
+#endif
   uint8_t *buffer = workBuffer;
-  uint8_t *mask = workBuffer + bufferSize;
-  uint8_t *dirtyFlags = mask + bufferSize;
+  uint8_t *dirtyFlags = workBuffer + bufferSize;
+#if defined( _ENABLE_COLLISION_CHECKS_ )
+  uint8_t *collisionBuffer = dirtyFlags + bufferSize;
+#endif
 
   // no collision yet
   bool collision = false;
@@ -228,9 +258,9 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
       else { memset( buffer, 0, bufferSize ); }
       // no data written yet
       memset( dirtyFlags, 0, bufferSize );
-    #ifdef _ENABLE_MASK_
-      // no mask here
-      memset( mask, 0, bufferSize );
+    #if defined( _ENABLE_COLLISION_CHECKS_ )
+      // no collisions yet
+      memset( collisionBuffer, 0, bufferSize );
     #endif
 
       const int16_t x_chunk_end = x_chunk + bufferSize;
@@ -334,14 +364,16 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                   }
                 }
 
-              #ifdef _ENABLE_MASK_  
+              #ifdef _ENABLE_COLLISION_CHECKS_
                 // check for collision with player sprite(s)
                 if ( n >= playerSprite )
                 {
-                  if ( mask[spriteStartX + x] & maskValue ) { collision = true; }
+                  if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
                 }
                 // add this mask to the previous masks
-                mask[spriteStartX + x] |= maskValue;
+                collisionBuffer[spriteStartX + x] |= maskValue;
+              #endif
+              #ifdef _ENABLE_MASK_
                 // remove background under the sprite
                 buffer[spriteStartX + x] &= ~maskValue;
                 addr++;
