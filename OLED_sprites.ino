@@ -4,25 +4,22 @@
 #include <ssd1306xled.h>
 #include "Sprites.h"
 
-// enable this to use the second byte of the sprite data as a mask
-// (for collision detection and better sprite rendering)
-// The interleaved bitmap/mask format is compatible with Arduboy sprites
-#define _ENABLE_MASK_
-
 // enable collision checks for the player sprite
 // without collision checks we don't need a mask buffer
-#ifdef _ENABLE_MASK_
-  #define _ENABLE_COLLISION_CHECKS_
-#endif
+#define _ENABLE_COLLISION_CHECKS_
 
 // calculate frame times and show max. frame time on the screen
 // checks and displays also collision of player sprite with other sprites
 #define _ENABLE_DIAGNOSTICS_
 
+// add the background image as a sprite - because we can
+//#define _CRAZY_DEMO_
+
 struct SSD1306_SPRITE_HEADER
 {
-  int8_t  width;          // for easier clipping, limits sprite width to 127 px ;)
-  uint8_t heightInPages;
+  uint8_t width;
+  int8_t  heightInPages;
+  int8_t  spriteFlags;
 };
 
 // management structure is 6 bytes of RAM per sprite 
@@ -53,16 +50,10 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                               const uint8_t playerSprite = 255, 
                             #endif
                               const uint8_t *background = nullptr, 
-                            #ifdef _ENABLE_MASK_
-                              const bool useMask = false,
-                            #endif
                               const uint8_t screenStartX = 0, const uint8_t screenWidth = 128,
                               const uint8_t screenStartPage = 0, const uint8_t screenEndPage = 7 );
 
-char str[10];
-
 SSD1306_SPRITE _spriteList[] = { 
-#ifdef _ENABLE_MASK_
   { 100, -4, 0, meteor_w_mask_16x16 },
   {  54, 43, 1, meteor_w_mask_16x16 },
   {  74, 19, 0, moon_w_mask_30x32 },
@@ -70,17 +61,12 @@ SSD1306_SPRITE _spriteList[] = {
   { 114, 38, 0, moon_w_mask_30x32 },
   {  90, 52, 0, meteor_w_mask_16x16 },
   {  67, 32, 2, meteor_w_mask_16x16 },
-  {  10,  0, 0, ship_w_mask_18x16 },
-#else
-  {  60, 32, 0, meteor_16x16 },
-  { 104, 10, 0, meteor_16x16 },
-  {  54, 43, 0, meteor_16x16 },
   {  84, 27, 0, moon_30x32 },
-  {  94, 58, 0, moon_30x32 },
-  { 127, 28, 0, meteor_16x16 },
-  { 118, 52, 0, meteor_16x16 },
-  {  20,  1, 0, ship_16x16 },
+#ifdef _CRAZY_DEMO_
+  { 128,  0, 0, Moon128x64 },
 #endif
+  {  10,  0, 0, ship_w_mask_18x16 },
+  // placeholders for removal of old sprites
   {},
   {},
   {},
@@ -89,12 +75,21 @@ SSD1306_SPRITE _spriteList[] = {
   {},
   {},
   {},
+  {},
+#ifdef _CRAZY_DEMO_
+  {},
+#endif
 };
 
 void setup() {
   _delay_ms(100);
   SSD1306.ssd1306_init();
 }
+
+#ifdef _ENABLE_DIAGNOSTICS_
+  // for diagnostic output
+  char str[10];
+#endif
 
 void loop() {
 
@@ -108,7 +103,7 @@ void loop() {
 
     SSD1306.ssd1306_fillscreen(0);
 
-    const uint8_t *background = !run ? nullptr : Moon128x64;
+    const uint8_t *background = !run ? nullptr : Moon128x64 + sizeof( SSD1306_SPRITE_HEADER );
 
   #ifdef _ENABLE_DIAGNOSTICS_
     int16_t maxFrameTime = 0;
@@ -163,12 +158,11 @@ void loop() {
       uint16_t startTime = millis();
     #endif
 
-    #ifdef _ENABLE_MASK_
       if ( ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1, 
                                   #ifdef _ENABLE_COLLISION_CHECKS_
                                     spriteCount - 1,
                                   #endif
-                                    background, true, 0, 128, 0, 7 ) )
+                                    background, 0, 128, 0, 7 ) )
       {
     #ifdef _ENABLE_DIAGNOSTICS_
         SSD1306.ssd1306_setpos( 96, 0 );
@@ -180,14 +174,7 @@ void loop() {
         SSD1306.ssd1306_string_font6x8( "ok   " );
     #endif
       }
-    #else
-      ssd1306_draw_sprites_px( _workBuffer, _workBufferSize, _spriteList, spriteCount << 1,
-                             #ifdef _ENABLE_COLLISION_CHECKS_
-                               spriteCount - 1,
-                             #endif
-                               background, 0, 128, 0, 7 );
-    #endif
-
+    
     #ifdef _ENABLE_DIAGNOSTICS_
       int frameTime = millis() - startTime;
       if ( frameTime > maxFrameTime ) { maxFrameTime = frameTime; }
@@ -224,9 +211,6 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                               const uint8_t playerSprite /*= 255*/,
                             #endif
                               const uint8_t *background /*= nullptr*/,
-                            #ifdef _ENABLE_MASK_  
-                              const bool useMask /*= false*/,
-                            #endif  
                               const uint8_t screenStartX /*= 0*/, const uint8_t screenWidth /*= 128*/,
                               const uint8_t screenStartPage /*= 0*/, const uint8_t screenEndPage /*= 7*/ )
 {
@@ -246,7 +230,7 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
   bool collision = false;
 
   // calculate last valid column
-  const uint8_t screenEndPosX = screenStartX + screenWidth - 1;
+  const int16_t screenEndPosX = screenStartX + screenWidth - 1;
 
   for ( int8_t page = screenStartPage; page <= screenEndPage; page++ )
   {
@@ -270,14 +254,17 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
       {
         // for readability
         SSD1306_SPRITE *sprite = &spriteList[n];
-        int16_t spriteStartX = sprite->x;
-        int8_t spriteWidth = pgm_read_byte( sprite->header + 0 );
+        int16_t _spriteStartX = sprite->x;
+        uint8_t spriteWidth = pgm_read_byte( sprite->header + 0 );
 
         // is the sprite visible in this buffer?
-        if ( spriteStartX + spriteWidth >= x_chunk && spriteStartX < x_chunk_end )
+        if ( _spriteStartX + spriteWidth >= x_chunk && _spriteStartX < x_chunk_end )
         {
           int8_t spriteHeightInPages = pgm_read_byte( sprite->header + 1 );
-          uint8_t spriteVerticalOffset = sprite->y & 0x07;
+          int8_t spriteVerticalOffset = sprite->y & 0x07;
+
+          int8_t spriteFlags = pgm_read_byte( sprite->header + 2 );
+          bool useMask = ( spriteFlags < 0 );
 
           // calculate start and end page
           int8_t startPage = sprite->y >> 3;
@@ -289,27 +276,28 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
           {
             // calculate offset to next sprite data row
             uint8_t spriteLineOffset = spriteWidth;
-          #ifdef _ENABLE_MASK_  
             if ( useMask ) { spriteLineOffset <<= 1; }
-          #endif
 
-            uint16_t bitmapOffset = 0;
+            size_t bitmapOffset = 0;
             // clip left
-            if ( spriteStartX < x_chunk )
+            if ( _spriteStartX < x_chunk )
             {
-              bitmapOffset = x_chunk - spriteStartX;
+              bitmapOffset = x_chunk - _spriteStartX;
               spriteWidth -= bitmapOffset;
-              spriteStartX = x_chunk;
+              _spriteStartX = x_chunk;
             }
             // clip right
-            if ( spriteStartX + spriteWidth >= x_chunk_end )
+            if ( _spriteStartX + spriteWidth >= x_chunk_end )
             {
-              spriteWidth = x_chunk_end - spriteStartX;
+              spriteWidth = x_chunk_end - _spriteStartX;
             }
 
             // normalize sprite x position
-            spriteStartX -= x_chunk;
-            const int8_t spriteEndX = spriteStartX + spriteWidth;
+            _spriteStartX -= x_chunk;
+
+            // now x is >= 0 and < bufferSize -> uint8_t is good enough
+            const uint8_t spriteStartX = uint8_t( _spriteStartX );
+            const uint8_t spriteEndX = spriteStartX + spriteWidth;
 
             // if the frame isn't negativ, the sprite will be drawn, otherwise it will be removed
             if ( sprite->frame >= 0 )
@@ -319,47 +307,39 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
 
               // calculate bitmap data address
               uint16_t addr = bitmapOffset;
-            #ifdef _ENABLE_MASK_  
               if ( useMask ) { addr <<= 1; }
-            #endif
               addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + ( page - startPage ) * spriteLineOffset );
 
-              for ( int8_t x = 0; x < spriteWidth; x++ )
+              for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
               {
                 uint8_t maskValue = 0;;
                 uint8_t pixels = 0;
 
                 if ( spriteVerticalOffset == 0 )
                 {
-                #ifdef _ENABLE_MASK_  
                   if ( useMask )
                   {
                     maskValue = pgm_read_byte( addr + 1 ); 
                   }
-                #endif
                   pixels = pgm_read_byte( addr );
                 }
                 else
                 {
                   if ( page < endPage )
                   {
-                  #ifdef _ENABLE_MASK_  
                     if ( useMask )
                     {
                       maskValue = pgm_read_byte( addr + 1 ) << spriteVerticalOffset;
                     }
-                  #endif
                     pixels = pgm_read_byte( addr ) << spriteVerticalOffset;
                   }
                   if ( page > startPage )
                   {
                     // look one row up
-                  #ifdef _ENABLE_MASK_  
                     if ( useMask )
                     {
                       maskValue |= pgm_read_byte( addr - spriteLineOffset + 1 ) >> ( 8 - spriteVerticalOffset );
                     }
-                  #endif
                     pixels |= pgm_read_byte( addr - spriteLineOffset ) >> ( 8 - spriteVerticalOffset );
                   }
                 }
@@ -368,23 +348,29 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 // check for collision with player sprite(s)
                 if ( n >= playerSprite )
                 {
-                  if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
+                  //if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
+                  if ( collisionBuffer[spriteStartX + x] & pixels ) { collision = true; }
                 }
-                // add this mask to the previous masks
-                collisionBuffer[spriteStartX + x] |= maskValue;
+                // add pixel data to collision buffer?
+                if ( spriteFlags & SpriteFlag::solid )
+                {
+                  //collisionBuffer[spriteStartX + x] |= maskValue;
+                  collisionBuffer[spriteStartX + x] |= pixels;
+                }
               #endif
-              #ifdef _ENABLE_MASK_
-                // remove background under the sprite
-                buffer[spriteStartX + x] &= ~maskValue;
-                addr++;
-              #endif
+                if ( useMask )
+                {
+                  // remove background under the sprite
+                  buffer[spriteStartX + x] &= ~maskValue;
+                  addr++;
+                }
                 buffer[spriteStartX + x] |= pixels;
                 addr++;
               }
             }
 
             // mark the sprite position as "dirty", so the background will be sent to the display
-            for ( uint8_t x = uint8_t( spriteStartX ); x < uint8_t( spriteEndX ); x++ ) { dirtyFlags[x] = true; }
+            for ( uint8_t x = uint8_t( spriteStartX ); x < spriteEndX; x++ ) { dirtyFlags[x] = true; }
 
           } // sprite is on page
 
