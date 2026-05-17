@@ -328,12 +328,14 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 if ( !( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::undraw ) )
                 {
                   // add frame offset
-                  bitmapOffset += ( sprite->frameAndFlags & spriteFrameMask ) * spriteLineOffset * spriteHeightInPages >> 1;
+                  uint16_t bitmapSize = spriteLineOffset * uint8_t( spriteHeightInPages );
+                  if ( useMask ) { bitmapSize >>= 1; }
+                  bitmapOffset += ( sprite->frameAndFlags & spriteFrameMask ) * bitmapSize;
 
                   // calculate bitmap data address
                   uint16_t addr = bitmapOffset;
                   if ( useMask ) { addr <<= 1; }
-                  addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + ( page - startPage ) * spriteLineOffset );
+                  addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + uint8_t( page - startPage ) * spriteLineOffset );
 
                   for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
                   {
