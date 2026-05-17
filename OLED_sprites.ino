@@ -24,6 +24,8 @@ struct SSD1306_SPRITE_HEADER
   uint8_t width;
   int8_t  heightInPages;
   int8_t  spriteFlags;
+  // the sprite data is following the header
+  // ....
 };
 
 // management structure is 6 bytes of RAM per sprite 
@@ -31,13 +33,23 @@ struct SSD1306_SPRITE
 {
   int16_t x;
   int8_t  y;
-  int8_t  frame;
+  int8_t  frameAndFlags; // [0..3] frame number
+                         // [4]    horizontal flip
+                         // [5]    vertical flip
+                         // [6]    invert sprite (only when mask available)
+                         // [7]    undraw - restore background/clear area
   const uint8_t *header;
-  // the sprite data is following the header
-  // ....
 };
 
-constexpr int8_t SPRITE_DELETE = -1;
+enum SSD1306_SPRITE_FLAGS
+{
+  hFlip  = 0x10,
+  vFlip  = 0x20,
+  invert = 0x40,
+  undraw = 0x80,
+};
+
+const uint8_t spriteFrameMask = 0x0f;
 
 // global RAM buffer
 constexpr uint8_t _spriteBufferSize = 64;
@@ -123,7 +135,7 @@ void loop() {
       memcpy( &_spriteList[spriteCount], _spriteList, sizeof( _spriteList ) >> 1 );
       for ( uint8_t n = spriteCount; n < spriteCount << 1; n++ )
       {
-        _spriteList[n].frame = SPRITE_DELETE;
+        _spriteList[n].frameAndFlags = SSD1306_SPRITE_FLAGS::undraw;
       }
 
       // move spaceship down and up again
@@ -139,8 +151,8 @@ void loop() {
           {
             if ( ( ( step + n ) & 0xf ) == 0 )
             {
-              _spriteList[n].frame ++;
-              _spriteList[n].frame &= 0x03;
+              _spriteList[n].frameAndFlags++;
+              _spriteList[n].frameAndFlags &= 0x03;
             }
           }
         }
@@ -151,8 +163,9 @@ void loop() {
           {
             if ( ( ( step + n ) & 0x0f ) == 0 )
             {
-              _spriteList[n].frame --;
-              _spriteList[n].frame &= 0x03;
+
+              _spriteList[n].frameAndFlags--;
+              _spriteList[n].frameAndFlags &= 0x03;
             }
           }
         }
@@ -311,11 +324,11 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 const uint8_t spriteStartX = uint8_t( _spriteStartX );
                 const uint8_t spriteEndX = spriteStartX + spriteWidth;
 
-                // if the frame isn't negativ, the sprite will be drawn, otherwise it will be removed
-                if ( sprite->frame >= 0 )
+                // should the sprite be drawn?
+                if ( !( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::undraw ) )
                 {
                   // add frame offset
-                  bitmapOffset += sprite->frame * spriteLineOffset * spriteHeightInPages >> 1;
+                  bitmapOffset += ( sprite->frameAndFlags & spriteFrameMask ) * spriteLineOffset * spriteHeightInPages >> 1;
 
                   // calculate bitmap data address
                   uint16_t addr = bitmapOffset;
