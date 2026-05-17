@@ -301,6 +301,7 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
               {
                 // calculate offset to next sprite data row
                 uint8_t spriteLineOffset = spriteWidth;
+                uint16_t bitmapSize = spriteLineOffset * uint8_t( spriteHeightInPages );
                 if ( useMask ) { spriteLineOffset <<= 1; }
 
                 size_t bitmapOffset = 0;
@@ -328,8 +329,6 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 if ( !( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::undraw ) )
                 {
                   // add frame offset
-                  uint16_t bitmapSize = spriteLineOffset * uint8_t( spriteHeightInPages );
-                  if ( useMask ) { bitmapSize >>= 1; }
                   bitmapOffset += ( sprite->frameAndFlags & spriteFrameMask ) * bitmapSize;
 
                   // calculate bitmap data address
