@@ -15,6 +15,10 @@
 // add the background image as a sprite - because we can
 //#define _CRAZY_DEMO_
 
+// for performance testing without i2c transfers
+//#define _NO_DATA_TRANSFER_
+
+// sprite header resides in flash [3 bytes per sprite]
 struct SSD1306_SPRITE_HEADER
 {
   uint8_t width;
@@ -255,125 +259,135 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
         // for readability
         SSD1306_SPRITE *sprite = &spriteList[n];
         int16_t _spriteStartX = sprite->x;
-        uint8_t spriteWidth = pgm_read_byte( sprite->header + 0 );
 
-        // is the sprite visible in this buffer?
-        if ( _spriteStartX + spriteWidth >= x_chunk && _spriteStartX < x_chunk_end )
+        // is the sprite visible in this buffer (check chunk end first)?
+        if ( _spriteStartX < x_chunk_end )
         {
-          int8_t spriteHeightInPages = pgm_read_byte( sprite->header + 1 );
-          int8_t spriteVerticalOffset = sprite->y & 0x07;
+          // read sprite width from flash
+          uint8_t spriteWidth = pgm_read_byte( sprite->header + 0 );
 
-          int8_t spriteFlags = pgm_read_byte( sprite->header + 2 );
-          bool useMask = ( spriteFlags < 0 );
-
-          // calculate start and end page
-          int8_t startPage = sprite->y >> 3;
-          int8_t endPage = startPage + spriteHeightInPages;
-          if ( !spriteVerticalOffset ) { endPage--; }
-
-          // is the sprite visible on this page?
-          if ( page >= startPage && page <= endPage )
+          // is the sprite visible in this buffer (check start position)?
+          if ( _spriteStartX + spriteWidth >= x_chunk )
           {
-            // calculate offset to next sprite data row
-            uint8_t spriteLineOffset = spriteWidth;
-            if ( useMask ) { spriteLineOffset <<= 1; }
+            const int8_t spriteHeightInPages = pgm_read_byte( sprite->header + 1 );
+            const int8_t spriteVerticalOffset = sprite->y & 0x07;
 
-            size_t bitmapOffset = 0;
-            // clip left
-            if ( _spriteStartX < x_chunk )
+            const int8_t spriteFlags = pgm_read_byte( sprite->header + 2 );
+            const bool useMask = ( spriteFlags < 0 );
+
+            // calculate start and end page
+            const int8_t startPage = sprite->y >> 3;
+
+            // is the sprite visible on this page?
+            if ( page >= startPage )
             {
-              bitmapOffset = x_chunk - _spriteStartX;
-              spriteWidth -= bitmapOffset;
-              _spriteStartX = x_chunk;
-            }
-            // clip right
-            if ( _spriteStartX + spriteWidth >= x_chunk_end )
-            {
-              spriteWidth = x_chunk_end - _spriteStartX;
-            }
+              int8_t endPage = startPage + spriteHeightInPages;
+              if ( !spriteVerticalOffset ) { endPage--; }
 
-            // normalize sprite x position
-            _spriteStartX -= x_chunk;
-
-            // now x is >= 0 and < bufferSize -> uint8_t is good enough
-            const uint8_t spriteStartX = uint8_t( _spriteStartX );
-            const uint8_t spriteEndX = spriteStartX + spriteWidth;
-
-            // if the frame isn't negativ, the sprite will be drawn, otherwise it will be removed
-            if ( sprite->frame >= 0 )
-            {
-              // add frame offset
-              bitmapOffset += sprite->frame * spriteLineOffset * spriteHeightInPages >> 1;
-
-              // calculate bitmap data address
-              uint16_t addr = bitmapOffset;
-              if ( useMask ) { addr <<= 1; }
-              addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + ( page - startPage ) * spriteLineOffset );
-
-              for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
+              if ( page <= endPage )
               {
-                uint8_t maskValue = 0;;
-                uint8_t pixels = 0;
+                // calculate offset to next sprite data row
+                uint8_t spriteLineOffset = spriteWidth;
+                if ( useMask ) { spriteLineOffset <<= 1; }
 
-                if ( spriteVerticalOffset == 0 )
+                size_t bitmapOffset = 0;
+                // clip left
+                if ( _spriteStartX < x_chunk )
                 {
-                  if ( useMask )
-                  {
-                    maskValue = pgm_read_byte( addr + 1 ); 
-                  }
-                  pixels = pgm_read_byte( addr );
+                  bitmapOffset = x_chunk - _spriteStartX;
+                  spriteWidth -= bitmapOffset;
+                  _spriteStartX = x_chunk;
                 }
-                else
+                // clip right
+                if ( _spriteStartX + spriteWidth >= x_chunk_end )
                 {
-                  if ( page < endPage )
-                  {
-                    if ( useMask )
-                    {
-                      maskValue = pgm_read_byte( addr + 1 ) << spriteVerticalOffset;
-                    }
-                    pixels = pgm_read_byte( addr ) << spriteVerticalOffset;
-                  }
-                  if ( page > startPage )
-                  {
-                    // look one row up
-                    if ( useMask )
-                    {
-                      maskValue |= pgm_read_byte( addr - spriteLineOffset + 1 ) >> ( 8 - spriteVerticalOffset );
-                    }
-                    pixels |= pgm_read_byte( addr - spriteLineOffset ) >> ( 8 - spriteVerticalOffset );
-                  }
+                  spriteWidth = x_chunk_end - _spriteStartX;
                 }
 
-              #ifdef _ENABLE_COLLISION_CHECKS_
-                // check for collision with player sprite(s)
-                if ( n >= playerSprite )
+                // normalize sprite x position
+                _spriteStartX -= x_chunk;
+
+                // now x is >= 0 and < bufferSize -> uint8_t is good enough
+                const uint8_t spriteStartX = uint8_t( _spriteStartX );
+                const uint8_t spriteEndX = spriteStartX + spriteWidth;
+
+                // if the frame isn't negativ, the sprite will be drawn, otherwise it will be removed
+                if ( sprite->frame >= 0 )
                 {
-                  //if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
-                  if ( collisionBuffer[spriteStartX + x] & pixels ) { collision = true; }
+                  // add frame offset
+                  bitmapOffset += sprite->frame * spriteLineOffset * spriteHeightInPages >> 1;
+
+                  // calculate bitmap data address
+                  uint16_t addr = bitmapOffset;
+                  if ( useMask ) { addr <<= 1; }
+                  addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + ( page - startPage ) * spriteLineOffset );
+
+                  for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
+                  {
+                    uint8_t maskValue = 0;;
+                    uint8_t pixels = 0;
+
+                    if ( spriteVerticalOffset == 0 )
+                    {
+                      if ( useMask )
+                      {
+                        maskValue = pgm_read_byte( addr + 1 ); 
+                      }
+                      pixels = pgm_read_byte( addr );
+                    }
+                    else
+                    {
+                      if ( page < endPage )
+                      {
+                        if ( useMask )
+                        {
+                          maskValue = pgm_read_byte( addr + 1 ) << spriteVerticalOffset;
+                        }
+                        pixels = pgm_read_byte( addr ) << spriteVerticalOffset;
+                      }
+                      if ( page > startPage )
+                      {
+                        // look one row up
+                        if ( useMask )
+                        {
+                          maskValue |= pgm_read_byte( addr - spriteLineOffset + 1 ) >> ( 8 - spriteVerticalOffset );
+                        }
+                        pixels |= pgm_read_byte( addr - spriteLineOffset ) >> ( 8 - spriteVerticalOffset );
+                      }
+                    }
+
+                  #ifdef _ENABLE_COLLISION_CHECKS_
+                    // check for collision with player sprite(s)
+                    if ( n >= playerSprite )
+                    {
+                      //if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
+                      if ( collisionBuffer[spriteStartX + x] & pixels ) { collision = true; }
+                    }
+                    // add pixel data to collision buffer?
+                    if ( spriteFlags & SpriteFlag::solid )
+                    {
+                      //collisionBuffer[spriteStartX + x] |= maskValue;
+                      collisionBuffer[spriteStartX + x] |= pixels;
+                    }
+                  #endif
+                    if ( useMask )
+                    {
+                      // remove background under the sprite
+                      buffer[spriteStartX + x] &= ~maskValue;
+                      addr++;
+                    }
+                    buffer[spriteStartX + x] |= pixels;
+                    addr++;
+                  }
                 }
-                // add pixel data to collision buffer?
-                if ( spriteFlags & SpriteFlag::solid )
-                {
-                  //collisionBuffer[spriteStartX + x] |= maskValue;
-                  collisionBuffer[spriteStartX + x] |= pixels;
-                }
-              #endif
-                if ( useMask )
-                {
-                  // remove background under the sprite
-                  buffer[spriteStartX + x] &= ~maskValue;
-                  addr++;
-                }
-                buffer[spriteStartX + x] |= pixels;
-                addr++;
+
+                // mark the sprite position as "dirty", so the background will be sent to the display
+                for ( uint8_t x = uint8_t( spriteStartX ); x < spriteEndX; x++ ) { dirtyFlags[x] = true; }
+
               }
-            }
+            } // sprite is on page
 
-            // mark the sprite position as "dirty", so the background will be sent to the display
-            for ( uint8_t x = uint8_t( spriteStartX ); x < spriteEndX; x++ ) { dirtyFlags[x] = true; }
-
-          } // sprite is on page
-
+          }
         } // sprite is in buffer
 
       } // for n
@@ -391,24 +405,32 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
           {
             // start a new transfer
             transferActive = true;
+          #ifndef _NO_DATA_TRANSFER_
             SSD1306.ssd1306_setpos( x + x_chunk, page );
             SSD1306.ssd1306_send_data_start();
+          #endif
           }
+        #ifndef _NO_DATA_TRANSFER_
           SSD1306.ssd1306_send_byte( buffer[x] );
+        #endif
         }
         // was there an active transfer?
         else if ( transferActive )
         {
           // stop transfer
           transferActive = false;
+        #ifndef _NO_DATA_TRANSFER_
           SSD1306.ssd1306_send_data_stop();
+        #endif
         }
       }
       // is a transfer still active?
       if ( transferActive )
       {
+      #ifndef _NO_DATA_TRANSFER_
         // stop transfer
         SSD1306.ssd1306_send_data_stop();
+      #endif
       }
 
     } // for x_chunk
