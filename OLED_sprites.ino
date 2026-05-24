@@ -22,14 +22,14 @@ constexpr uint8_t _spriteBufferSize = 64;
 uint8_t _workBuffer[_workBufferSize];
 
 SSD1306_SPRITE _spriteList[] = { 
-  { 100, -4, 0, meteor_w_mask_16x16 },
+  { 100, -4, SSD1306_SPRITE_FLAGS::hFlip, meteor_w_mask_16x16 },
   {  54, 43, 1, meteor_w_mask_16x16 },
   {  74, 19, 0, moon_w_mask_30x32 },
   { 140, 28, 3, meteor_w_mask_16x16 },
-  { 114, 38, 0, moon_w_mask_30x32 },
+  { 114, 38, SSD1306_SPRITE_FLAGS::hFlip, moon_w_mask_30x32 },
   {  90, 52, 0, meteor_w_mask_16x16 },
   {  67, 32, 2, meteor_w_mask_16x16 },
-  {  84, 27, 0, moon_30x32 },
+  {  84, 27, SSD1306_SPRITE_FLAGS::hFlip, moon_30x32 },
 #ifdef _CRAZY_DEMO_
   { 128,  0, 0, Moon128x64 },
 #endif
@@ -146,7 +146,7 @@ void loop() {
         SSD1306.ssd1306_string_font6x8( "ok   " );
       #endif
         // everything is fine!
-        _spriteList[spriteCount - 1].frameAndFlags = 0;
+        _spriteList[spriteCount - 1].frameAndFlags = SSD1306_SPRITE_FLAGS::vFlip;
       }
     
     #ifdef _ENABLE_DIAGNOSTICS_

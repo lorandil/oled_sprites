@@ -8,7 +8,10 @@
 #define _ENABLE_COLLISION_CHECKS_
 
 // enable support for inverted sprites (24 bytes of flash)
-#define _ENABLE_SPRITE_INVERSION_
+#define _ENABLE_SPRITE_INVERSION_SUPPORT_
+
+// enable support for horizontal flipping the sprites (32 bytes of flash)
+#define _ENABLE_SPRITE_HFLIP_SUPPORT_
 
 // for performance testing without i2c transfers
 //#define _NO_DATA_TRANSFER_
@@ -133,7 +136,6 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                 // calculate offset to next sprite data row
                 uint8_t spriteLineOffset = spriteWidth;
                 uint16_t bitmapSize = spriteLineOffset * uint8_t( spriteHeightInPages );
-                if ( useMask ) { spriteLineOffset <<= 1; }
 
                 uint16_t bitmapOffset = 0;
                 // clip left
@@ -164,7 +166,17 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
 
                   // calculate bitmap data address
                   uint16_t addr = bitmapOffset;
-                  if ( useMask ) { addr <<= 1; }
+                #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_
+                  // horizontal flip?
+                  bool hFlip = ( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::hFlip );
+                  if ( hFlip )
+                  {
+                    // flip to the other side of the sprite
+                    addr = spriteLineOffset - 1 - bitmapOffset;
+                  }
+                #endif
+                  if ( useMask ) { spriteLineOffset <<= 1;
+                                   addr <<= 1; }
                   addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + uint8_t( page - startPage ) * spriteLineOffset );
 
                   for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
@@ -219,16 +231,24 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                     {
                       // remove background under the sprite
                       buffer[spriteStartX + x] &= ~maskValue;
-                      addr++;
+                    #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_  
+                      if ( hFlip ) { addr--; }
+                      else 
+                    #endif
+                      { addr++; }
                     }
-                  #ifdef _ENABLE_SPRITE_INVERSION_
+                  #ifdef _ENABLE_SPRITE_INVERSION_SUPPORT_
                     if ( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::invert )
                     {
                       pixels = ~pixels & maskValue;
                     }
                   #endif
                     buffer[spriteStartX + x] |= pixels;
-                    addr++;
+                  #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_  
+                    if ( hFlip ) { addr--; }
+                    else 
+                  #endif
+                    { addr++; }
                   }
                 }
 
