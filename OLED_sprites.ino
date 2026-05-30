@@ -31,7 +31,7 @@ SSD1306_SPRITE _spriteList[] = {
   {  67, 32, 2, meteor_w_mask_16x16 },
   {  84, 27, SSD1306_SPRITE_FLAGS::hFlip, moon_30x32 },
 #ifdef _CRAZY_DEMO_
-  { 128,  0, 0, Moon128x64 },
+  { 128,  0, SSD1306_SPRITE_FLAGS::hFlip, Moon128x64 },
 #endif
   {  10,  0, 0, ship_w_mask_18x16 },
   // placeholders for removal of old sprites
@@ -146,7 +146,7 @@ void loop() {
         SSD1306.ssd1306_string_font6x8( "ok   " );
       #endif
         // everything is fine!
-        _spriteList[spriteCount - 1].frameAndFlags = SSD1306_SPRITE_FLAGS::vFlip;
+        //_spriteList[spriteCount - 1].frameAndFlags = SSD1306_SPRITE_FLAGS::vFlip; // TODO
       }
     
     #ifdef _ENABLE_DIAGNOSTICS_

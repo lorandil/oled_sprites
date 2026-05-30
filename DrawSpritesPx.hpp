@@ -7,10 +7,10 @@
 // without collision checks we don't need a mask buffer
 #define _ENABLE_COLLISION_CHECKS_
 
-// enable support for inverted sprites (24 bytes of flash)
+// enable support for inverted sprites
 #define _ENABLE_SPRITE_INVERSION_SUPPORT_
 
-// enable support for horizontal flipping the sprites (32 bytes of flash)
+// enable support for horizontal flipping the sprites
 #define _ENABLE_SPRITE_HFLIP_SUPPORT_
 
 // for performance testing without i2c transfers
@@ -21,7 +21,7 @@ struct SSD1306_SPRITE_HEADER
 {
   uint8_t width;
   int8_t  heightInPages;
-  int8_t  spriteFlags;
+  int8_t  spriteAttributes;
   // the sprite data is following the header
   // ....
 };
@@ -42,7 +42,7 @@ struct SSD1306_SPRITE
 enum SSD1306_SPRITE_FLAGS
 {
   hFlip  = 0x10,
-  vFlip  = 0x20,
+  //vFlip  = 0x20,  // TODO
   invert = 0x40,
   undraw = 0x80,
 };
@@ -117,10 +117,11 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
           if ( _spriteStartX + spriteWidth >= x_chunk )
           {
             const int8_t spriteHeightInPages = pgm_read_byte( sprite->header + 1 );
-            const int8_t spriteVerticalOffset = sprite->y & 0x07;
+            const int8_t spriteVerticalShift = sprite->y & 0x07;
 
-            const int8_t spriteFlags = pgm_read_byte( sprite->header + 2 );
-            const bool useMask = ( spriteFlags < 0 );
+            const int8_t spriteAttributes = pgm_read_byte( sprite->header + 2 );
+            // check for bit 7: SpriteAttribute::hasMask
+            const bool useMask = ( spriteAttributes < 0 );
 
             // calculate start and end page
             const int8_t startPage = sprite->y >> 3;
@@ -129,7 +130,7 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
             if ( page >= startPage )
             {
               int8_t endPage = startPage + spriteHeightInPages;
-              if ( !spriteVerticalOffset ) { endPage--; }
+              if ( !spriteVerticalShift ) { endPage--; }
 
               if ( page <= endPage )
               {
@@ -165,51 +166,56 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                   bitmapOffset += ( sprite->frameAndFlags & spriteFrameMask ) * bitmapSize;
 
                   // calculate bitmap data address
-                  uint16_t addr = bitmapOffset;
                 #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_
                   // horizontal flip?
                   bool hFlip = ( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::hFlip );
-                  if ( hFlip )
-                  {
-                    // flip to the other side of the sprite
-                    addr = spriteLineOffset - 1 - bitmapOffset;
-                  }
+                  // flip to the other side of the sprite
+                  uint16_t addr = hFlip ? spriteLineOffset - 1 - bitmapOffset
+                                        : bitmapOffset;
+                  uint16_t offsetNextAddr = hFlip ? -1 : 1;
+                #else
+                  uint16_t addr = bitmapOffset;
+                  uint16_t offsetNextAddr = 1;
                 #endif
                   if ( useMask ) { spriteLineOffset <<= 1;
-                                   addr <<= 1; }
+                                   addr <<= 1;
+                                   offsetNextAddr <<= 1; }
                   addr += uint16_t( spriteList[n].header + sizeof( SSD1306_SPRITE_HEADER ) + uint8_t( page - startPage ) * spriteLineOffset );
 
                   for ( uint8_t x = 0; x < uint8_t( spriteWidth ); x++ )
                   {
-                    uint8_t maskValue = 0;;
+                    uint8_t mask = 0;;
                     uint8_t pixels = 0;
-
-                    if ( spriteVerticalOffset == 0 )
+                    // if the sprite doesn't need to be shifted vertically, only one source byte is required
+                    if ( spriteVerticalShift == 0 )
                     {
                       if ( useMask )
                       {
-                        maskValue = pgm_read_byte( addr + 1 ); 
+                        mask = pgm_read_byte( addr + 1 ); 
                       }
                       pixels = pgm_read_byte( addr );
                     }
+                    // otherwise two source bytes are required
                     else
                     {
+                      // not in the last row?
                       if ( page < endPage )
                       {
                         if ( useMask )
                         {
-                          maskValue = pgm_read_byte( addr + 1 ) << spriteVerticalOffset;
+                          mask = pgm_read_byte( addr + 1 ) << spriteVerticalShift;
                         }
-                        pixels = pgm_read_byte( addr ) << spriteVerticalOffset;
+                        pixels = pgm_read_byte( addr ) << spriteVerticalShift;
                       }
+                      // not in the first row?
                       if ( page > startPage )
                       {
                         // look one row up
                         if ( useMask )
                         {
-                          maskValue |= pgm_read_byte( addr - spriteLineOffset + 1 ) >> ( 8 - spriteVerticalOffset );
+                          mask |= pgm_read_byte( addr - spriteLineOffset + 1 ) >> ( 8 - spriteVerticalShift );
                         }
-                        pixels |= pgm_read_byte( addr - spriteLineOffset ) >> ( 8 - spriteVerticalOffset );
+                        pixels |= pgm_read_byte( addr - spriteLineOffset ) >> ( 8 - spriteVerticalShift );
                       }
                     }
 
@@ -217,38 +223,35 @@ bool ssd1306_draw_sprites_px( uint8_t *workBuffer, const uint8_t workBufferSize,
                     // check for collision with player sprite(s)
                     if ( n >= playerSprite )
                     {
-                      //if ( collisionBuffer[spriteStartX + x] & maskValue ) { collision = true; }
+                      // Big question: Use pixel data or mask data for collision detection? 
+                      // - mask data covers the whole sprite but might contain a border that's just
+                      //   for separating the sprite from the background and not part of the collision area
+                      // - pixel data covers the visible parts of the sprite, but might contain holes that 
+                      //   *are* part of the collision area..
+                      // We got with pixels here nonetheless ;)
+                      //if ( collisionBuffer[spriteStartX + x] & mask ) { collision = true; }
                       if ( collisionBuffer[spriteStartX + x] & pixels ) { collision = true; }
                     }
                     // add pixel data to collision buffer?
-                    if ( spriteFlags & SpriteFlag::solid )
+                    if ( spriteAttributes & SpriteAttribute::solid )
                     {
-                      //collisionBuffer[spriteStartX + x] |= maskValue;
+                      //collisionBuffer[spriteStartX + x] |= mask;
                       collisionBuffer[spriteStartX + x] |= pixels;
                     }
                   #endif
                     if ( useMask )
                     {
                       // remove background under the sprite
-                      buffer[spriteStartX + x] &= ~maskValue;
-                    #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_  
-                      if ( hFlip ) { addr--; }
-                      else 
-                    #endif
-                      { addr++; }
+                      buffer[spriteStartX + x] &= ~mask;
                     }
                   #ifdef _ENABLE_SPRITE_INVERSION_SUPPORT_
                     if ( sprite->frameAndFlags & SSD1306_SPRITE_FLAGS::invert )
                     {
-                      pixels = ~pixels & maskValue;
+                      pixels = ~pixels & mask;
                     }
                   #endif
                     buffer[spriteStartX + x] |= pixels;
-                  #ifdef _ENABLE_SPRITE_HFLIP_SUPPORT_  
-                    if ( hFlip ) { addr--; }
-                    else 
-                  #endif
-                    { addr++; }
+                    addr += offsetNextAddr;
                   }
                 }
 
