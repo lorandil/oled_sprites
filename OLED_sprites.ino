@@ -146,7 +146,7 @@ void loop() {
         SSD1306.ssd1306_string_font6x8( "ok   " );
       #endif
         // everything is fine!
-        //_spriteList[spriteCount - 1].frameAndFlags = SSD1306_SPRITE_FLAGS::vFlip; // TODO
+        _spriteList[spriteCount - 1].frameAndFlags = 0;
       }
     
     #ifdef _ENABLE_DIAGNOSTICS_
